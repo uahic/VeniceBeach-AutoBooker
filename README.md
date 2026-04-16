@@ -1,5 +1,7 @@
 # VeniceBeach Karlsruhe Sudstadt AutoBooker
 
+Geht euch auf der Lauer liegen für eine Kursanmeldung auf den Sack? mir auch.
+
 Kurse können im Vorraus in einem Wochenplan festgelegt werden zur Buchung, der Hintergrundprozess (Ein Python WebServer basierend auf Flask) versucht dann ab dem ersten möglichen Zeitpunkt jede Minute eine Buchung oder setzt dich auf die Warteliste (falls es eine gibt).
 Die Verwendung der App macht natürlich nur als dauerhaft laufender Hintergrundprozess/Server Sinn (Server, NAS, RaspberryPI,...)
 
