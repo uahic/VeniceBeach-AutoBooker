@@ -8,7 +8,7 @@ from flask import Flask, jsonify, request, render_template, abort
 import db
 import actinate
 import scheduler as sched
-import secrets as sec
+import token_store as sec
 
 logging.basicConfig(
     level=logging.INFO,

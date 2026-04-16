@@ -4,6 +4,12 @@ Kurse können im Vorraus in einem Wochenplan festgelegt werden zur Buchung, der 
 
 Alles läuft bei euch lokal auf dem Rechner, es wird kein Cloud-Service verwendet.
 
+
+Ein lokales Testen der App (ohne Installation der App selbst als Systemservice) ist durch ausführen von ```python app.py```, sofern die Python-Dependencies aus requirements.txt installiert wurden, möglich (und öffnen im Browser unter ```http://localhost:5000```).
+
+![ScreenshotLogin](screenshots/screenshot_login.png)
+![ScreenshotListe](screenshots/screenshot_list.png)
+
 ## Sicherheitsaspekte 
 Euer Passwort und Benutzername wird niergends gespeichert (könnt ihr im Source Code prüfen oder von einem Chatbot prüfen lassen). 
 
