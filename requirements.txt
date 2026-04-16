@@ -1,0 +1,5 @@
+flask>=3.0
+apscheduler>=3.10
+requests>=2.31
+cryptography>=42.0
+keyring>=24.0

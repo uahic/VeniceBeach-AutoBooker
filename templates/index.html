@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>VeniceBeach Auto-Booker</title>
+  <style>
+    :root {
+      --blue: #009fe3;
+      --dark: #1a1a2e;
+      --card: #ffffff;
+      --bg: #f0f4f8;
+      --muted: #666;
+      --red: #e53935;
+      --green: #43a047;
+      --orange: #fb8c00;
+      --border: #dde3ea;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: #222; }
+
+    header {
+      background: var(--dark);
+      color: #fff;
+      padding: 0 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      height: 56px;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 700; flex: 1; }
+    header .status-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--red); transition: background .3s;
+    }
+    header .status-dot.on { background: var(--green); }
+    header .user-label { font-size: .85rem; opacity: .7; }
+
+    .toolbar {
+      background: #fff;
+      border-bottom: 1px solid var(--border);
+      padding: .6rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      flex-wrap: wrap;
+    }
+    .btn {
+      padding: .45rem 1rem;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: .9rem;
+      font-weight: 500;
+      transition: opacity .15s;
+    }
+    .btn:hover { opacity: .85; }
+    .btn:disabled { opacity: .4; cursor: default; }
+    .btn-primary { background: var(--blue); color: #fff; }
+    .btn-outline { background: transparent; border: 1.5px solid var(--blue); color: var(--blue); }
+    .btn-danger { background: var(--red); color: #fff; }
+    .btn-sm { padding: .3rem .7rem; font-size: .82rem; }
+
+    .week-nav { display: flex; align-items: center; gap: .5rem; margin-left: auto; }
+    .week-nav span { font-size: .9rem; font-weight: 600; min-width: 180px; text-align: center; }
+
+    main { max-width: 900px; margin: 1.5rem auto; padding: 0 1rem; }
+
+    /* Login modal */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.5);
+      display: flex; align-items: center; justify-content: center; z-index: 100;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal {
+      background: #fff; border-radius: 12px; padding: 2rem;
+      width: min(400px, 95vw); box-shadow: 0 8px 30px rgba(0,0,0,.25);
+    }
+    .modal h2 { margin-bottom: 1.2rem; font-size: 1.2rem; }
+    .field { margin-bottom: 1rem; }
+    .field label { display: block; font-size: .85rem; font-weight: 600; margin-bottom: .3rem; color: var(--muted); }
+    .field input {
+      width: 100%; padding: .6rem .8rem; border: 1.5px solid var(--border);
+      border-radius: 7px; font-size: 1rem; outline: none;
+    }
+    .field input:focus { border-color: var(--blue); }
+    .error-msg { color: var(--red); font-size: .85rem; margin-top: .5rem; }
+
+    /* Course cards */
+    .day-block { margin-bottom: 2rem; }
+    .day-label {
+      font-size: .8rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--muted); margin-bottom: .7rem;
+      padding-bottom: .35rem; border-bottom: 2px solid var(--border);
+    }
+    .course-grid { display: grid; gap: .7rem; }
+
+    .course-card {
+      background: var(--card);
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: .85rem 1rem;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: .5rem 1rem;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .course-card.subscribed {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(0,159,227,.12);
+    }
+    .course-card.joined-yes {
+      border-color: var(--green);
+      box-shadow: 0 0 0 3px rgba(67,160,71,.13);
+    }
+    .course-card .meta { font-size: .82rem; color: var(--muted); margin-top: .2rem; }
+    .course-card .name { font-weight: 600; font-size: .97rem; }
+    .course-card .badge {
+      display: inline-block; font-size: .7rem; font-weight: 700;
+      padding: .15rem .5rem; border-radius: 20px;
+      background: #e8f5fe; color: var(--blue); margin-left: .4rem;
+      vertical-align: middle;
+    }
+    .badge-booked {
+      display: inline-flex; align-items: center; gap: .25rem;
+      font-size: .75rem; font-weight: 700;
+      padding: .2rem .6rem; border-radius: 20px;
+      background: #e8f5e9; color: var(--green);
+      margin-top: .35rem;
+    }
+    .occupancy-bar {
+      display: flex; align-items: center; gap: .4rem;
+      font-size: .78rem; color: var(--muted); margin-top: .3rem;
+    }
+    .occ-bar-track {
+      flex: 1; max-width: 80px; height: 5px;
+      background: #e0e0e0; border-radius: 3px; overflow: hidden;
+    }
+    .occ-bar-fill {
+      height: 100%; border-radius: 3px;
+      background: var(--green); transition: width .3s;
+    }
+    .occ-bar-fill.warn { background: var(--orange); }
+    .occ-bar-fill.full { background: var(--red); }
+    .badge-full {
+      display: inline-flex; align-items: center;
+      font-size: .75rem; font-weight: 700;
+      padding: .2rem .6rem; border-radius: 20px;
+      background: #ffebee; color: var(--red);
+      margin-top: .35rem;
+    }
+    .btn-leave {
+      font-size: .75rem; font-weight: 600;
+      padding: .2rem .65rem; border-radius: 20px;
+      border: 1.5px solid var(--red); color: var(--red);
+      background: transparent; cursor: pointer;
+      margin-left: .5rem; vertical-align: middle;
+      transition: background .15s, color .15s;
+    }
+    .btn-leave:hover { background: var(--red); color: #fff; }
+    .course-card .open-hint {
+      font-size: .78rem; color: var(--orange); margin-top: .25rem;
+    }
+
+    /* Toggle switch */
+    .toggle-wrap { display: flex; flex-direction: column; align-items: center; gap: .3rem; }
+    .toggle-wrap span { font-size: .7rem; color: var(--muted); }
+    .toggle {
+      position: relative; width: 46px; height: 26px;
+      cursor: pointer; flex-shrink: 0;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute; inset: 0; background: #ccc;
+      border-radius: 26px; transition: .2s;
+    }
+    .toggle .slider::before {
+      content: ""; position: absolute;
+      height: 20px; width: 20px; left: 3px; bottom: 3px;
+      background: #fff; border-radius: 50%; transition: .2s;
+    }
+    .toggle input:checked + .slider { background: var(--blue); }
+    .toggle input:checked + .slider::before { transform: translateX(20px); }
+
+    /* Log panel */
+    .log-section { margin-top: 2.5rem; }
+    .log-section h2 { font-size: 1rem; font-weight: 700; margin-bottom: .8rem; }
+    .log-table {
+      width: 100%; border-collapse: collapse; font-size: .82rem;
+      background: var(--card); border-radius: 10px; overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07);
+    }
+    .log-table th {
+      background: #f5f7fa; text-align: left; padding: .55rem .8rem;
+      font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border);
+    }
+    .log-table td { padding: .55rem .8rem; border-bottom: 1px solid var(--border); }
+    .log-table tr:last-child td { border-bottom: none; }
+    .pill {
+      display: inline-block; padding: .15rem .55rem; border-radius: 20px;
+      font-size: .73rem; font-weight: 700;
+    }
+    .pill-booked { background: #e8f5e9; color: var(--green); }
+    .pill-failed { background: #ffebee; color: var(--red); }
+    .pill-scheduled { background: #fff8e1; color: var(--orange); }
+    .pill-canceled { background: #ede7f6; color: #7b1fa2; }
+    .pill-waitlisted { background: #fff3e0; color: var(--orange); }
+
+    .course-card.waitlisted {
+      border-color: var(--orange);
+      box-shadow: 0 0 0 3px rgba(251,140,0,.13);
+    }
+    .badge-waitlist {
+      display: inline-flex; align-items: center; gap: .25rem;
+      font-size: .75rem; font-weight: 700;
+      padding: .2rem .6rem; border-radius: 20px;
+      background: #fff3e0; color: var(--orange);
+      margin-top: .35rem;
+    }
+    .btn-waitlist-leave {
+      font-size: .75rem; font-weight: 600;
+      padding: .2rem .65rem; border-radius: 20px;
+      border: 1.5px solid var(--orange); color: var(--orange);
+      background: transparent; cursor: pointer;
+      margin-left: .5rem; vertical-align: middle;
+      transition: background .15s, color .15s;
+    }
+    .btn-waitlist-leave:hover { background: var(--orange); color: #fff; }
+    .btn-waitlist-join {
+      font-size: .75rem; font-weight: 600;
+      padding: .2rem .65rem; border-radius: 20px;
+      border: 1.5px solid var(--orange); color: var(--orange);
+      background: transparent; cursor: pointer;
+      margin-top: .35rem; display: inline-block;
+      transition: background .15s, color .15s;
+    }
+    .btn-waitlist-join:hover { background: var(--orange); color: #fff; }
+
+    .empty { text-align: center; color: var(--muted); padding: 3rem 1rem; }
+    .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid #ccc; border-top-color: var(--blue); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; display: flex; flex-direction: column; gap: .5rem; z-index: 999; }
+    .toast {
+      padding: .7rem 1.1rem; border-radius: 8px; font-size: .9rem; font-weight: 500;
+      box-shadow: 0 4px 15px rgba(0,0,0,.2); color: #fff;
+      animation: slideIn .25s ease;
+    }
+    .toast-ok { background: var(--green); }
+    .toast-err { background: var(--red); }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+
+<!-- Header (always visible) -->
+<header>
+  <h1>🏋️ VeniceBeach Auto-Booker</h1>
+  <span class="user-label" id="userLabel"></span>
+  <button class="btn btn-sm" id="logoutBtn" onclick="doLogout()" style="display:none;background:#ffffff22;color:#fff">Abmelden</button>
+</header>
+
+<!-- Login wall (shown when not logged in) -->
+<div id="loginWall" style="display:none; min-height:calc(100vh - 56px); display:flex; align-items:center; justify-content:center; background:var(--bg);">
+  <div class="modal" style="box-shadow:0 8px 40px rgba(0,0,0,.15)">
+    <div style="text-align:center;margin-bottom:1.5rem">
+      <div style="font-size:2.5rem;margin-bottom:.5rem">🏋️</div>
+      <h2 style="font-size:1.3rem">Anmelden</h2>
+      <p style="font-size:.85rem;color:var(--muted);margin-top:.4rem" id="loginSubtitle">Bitte melde dich mit deinen VeniceBeach App-Zugangsdaten an.</p>
+    </div>
+    <div class="field">
+      <label>E-Mail</label>
+      <input type="email" id="loginEmail" placeholder="deine@email.de" autocomplete="email"/>
+    </div>
+    <div class="field">
+      <label>Passwort</label>
+      <input type="password" id="loginPw" placeholder="••••••••" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter')doLogin()"/>
+    </div>
+    <div id="loginError" class="error-msg"></div>
+    <button class="btn btn-primary" onclick="doLogin()" style="width:100%;margin-top:1.2rem;padding:.65rem">
+      <span id="loginSpinner" class="spinner" style="display:none"></span>
+      Einloggen
+    </button>
+  </div>
+</div>
+
+<!-- App shell (hidden until logged in) -->
+<div id="appShell" style="display:none">
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <button class="btn btn-primary btn-sm" onclick="doFetch()">
+    <span id="fetchSpinner" style="display:none" class="spinner"></span>
+    Kursplan aktualisieren
+  </button>
+  <span id="lastFetch" style="font-size:.82rem;color:var(--muted)"></span>
+  <div class="week-nav">
+    <button class="btn btn-outline btn-sm" onclick="changeWeek(-1)">&#8249; Zurück</button>
+    <span id="weekLabel">Lade…</span>
+    <button class="btn btn-outline btn-sm" onclick="changeWeek(1)">Vor &#8250;</button>
+  </div>
+</div>
+
+<!-- Main -->
+<main id="main">
+  <p class="empty"><span class="spinner"></span> Kurse werden geladen…</p>
+</main>
+
+<!-- Log -->
+<main>
+  <div class="log-section">
+    <h2>Buchungsprotokoll</h2>
+    <table class="log-table" id="logTable">
+      <thead>
+        <tr>
+          <th>Kurs</th>
+          <th>Uhrzeit</th>
+          <th>Status</th>
+          <th>Meldung</th>
+          <th>Zeitpunkt</th>
+        </tr>
+      </thead>
+      <tbody id="logBody"><tr><td colspan="5" style="text-align:center;padding:1rem;color:var(--muted)">Noch keine Einträge</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+</div><!-- /appShell -->
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+const DAY_NAMES = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+
+let weekOffset = 0;
+let loggedIn = false;
+
+// ── Status polling ──────────────────────────────────────────────────────────
+
+async function refreshStatus() {
+  const data = await apiFetch('/api/status');
+  loggedIn = data.logged_in;
+
+  document.getElementById('loginWall').style.display = loggedIn ? 'none' : 'flex';
+  document.getElementById('appShell').style.display  = loggedIn ? 'block' : 'none';
+  document.getElementById('logoutBtn').style.display = loggedIn ? '' : 'none';
+
+  if (!loggedIn) {
+    if (data.session_expired) {
+      document.getElementById('loginSubtitle').style.display = 'none';
+      document.getElementById('loginError').textContent = 'Sitzung abgelaufen – bitte erneut anmelden.';
+      setTimeout(() => document.getElementById('loginEmail').focus(), 50);
+    }
+  }
+
+  if (loggedIn) {
+    const settings = await apiFetch('/api/settings');
+    document.getElementById('userLabel').textContent = settings.user_name || '';
+    if (data.last_fetch) {
+      const d = new Date(data.last_fetch * 1000);
+      document.getElementById('lastFetch').textContent =
+        'Letzter Abruf: ' + d.toLocaleString('de-DE', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    }
+  }
+}
+
+// ── Occupancy helper ────────────────────────────────────────────────────────
+
+function occupancyHtml(occ) {
+  const count = occ.attendees_count;
+  const max   = occ.max_participants;
+
+  // No data available (unauthenticated fetch or API didn't return it)
+  if (count === null || count === undefined) {
+    if (max) return `<div class="occupancy-bar"><span>max. ${max} TN</span></div>`;
+    return '';
+  }
+
+  const isFull = max !== null && max !== undefined && count >= max;
+  const pct    = max ? Math.min(100, Math.round(count / max * 100)) : 0;
+  const fillClass = isFull ? 'full' : pct >= 80 ? 'warn' : '';
+  const bar = max
+    ? `<div class="occ-bar-track"><div class="occ-bar-fill ${fillClass}" style="width:${pct}%"></div></div>`
+    : '';
+  const label = max ? `${count}/${max} Plätze` : `${count} angemeldet`;
+
+  if (isFull) {
+    return `<div class="badge-full">&#9888; Kurs voll (${count}/${max})</div>`;
+  }
+  return `<div class="occupancy-bar">${bar}<span>${label}</span></div>`;
+}
+
+// ── Course list ─────────────────────────────────────────────────────────────
+
+async function loadCourses(silent = false) {
+  const main = document.getElementById('main');
+  const savedY = window.scrollY;
+  if (!silent) {
+    main.innerHTML = '<p class="empty"><span class="spinner"></span> Lade…</p>';
+  }
+  const data = await apiFetch(`/api/courses?week_offset=${weekOffset}`);
+  document.getElementById('weekLabel').textContent = data.week_label;
+
+  if (!data.days || data.days.length === 0) {
+    document.getElementById('main').innerHTML =
+      '<p class="empty">Keine Kurse für diese Woche gespeichert.<br>Klicke auf "Kursplan aktualisieren".</p>';
+    return;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  let html = '';
+  for (const day of data.days) {
+    html += `<div class="day-block">
+      <div class="day-label">${day.label}</div>
+      <div class="course-grid">`;
+    for (const occ of day.occurrences) {
+      const isPast = occ.end_at < now;
+      const isSubscribed = occ.subscribed;
+      const isJoined = occ.joined;       // already booked (from API)
+      const waitlistPos = occ.waitlist_position;
+      const isWaitlisted = waitlistPos !== null && waitlistPos !== undefined;
+      const bookingOpen = occ.booking_opens_at <= now;
+      const isFull = occ.max_participants !== null && occ.attendees_count !== null
+                     && occ.attendees_count >= occ.max_participants;
+      // Card border priority: green = booked, orange = waitlisted, blue = subscribed, none = plain
+      const cardClass = isJoined ? 'joined-yes' : (isWaitlisted ? 'waitlisted' : (isSubscribed ? 'subscribed' : ''));
+      html += `
+        <div class="course-card ${cardClass}" id="card-${occ.id}" style="${isPast ? 'opacity:.45' : ''}">
+          <div>
+            <div class="name">${escHtml(occ.name)}
+              ${occ.category ? `<span class="badge">${escHtml(occ.category)}</span>` : ''}
+            </div>
+            <div class="meta">
+              ${occ.start_str} – ${occ.end_str}
+              ${occ.room ? ' &bull; ' + escHtml(occ.room) : ''}
+              ${!occ.join_mandatory ? ' &bull; <em>Anmeldung freiwillig</em>' : ''}
+            </div>
+            ${occupancyHtml(occ)}
+            ${isJoined ? `<div style="margin-top:.35rem"><span class="badge-booked">&#10003; Angemeldet</span><button class="btn-leave" onclick="doLeave(${occ.id}, this)">Abmelden</button></div>` : ''}
+            ${isWaitlisted && !isJoined ? `<div style="margin-top:.35rem"><span class="badge-waitlist">&#8987; Warteliste Platz ${waitlistPos !== null ? waitlistPos : '?'}</span><button class="btn-waitlist-leave" onclick="doWaitlistLeave(${occ.id}, this)">Verlassen</button></div>` : ''}
+            ${!isJoined && !isWaitlisted && isFull && bookingOpen ? `<button class="btn-waitlist-join" onclick="doWaitlistJoin(${occ.id}, this)">Warteliste beitreten</button>` : ''}
+            ${!isJoined && !bookingOpen ? `<div class="open-hint">&#128275; Anmeldung ab ${occ.booking_opens_str}</div>` : ''}
+          </div>
+          <div class="toggle-wrap">
+            <label class="toggle" title="${isSubscribed ? 'Auto-Anmeldung aktiv' : 'Auto-Anmeldung aktivieren'}">
+              <input type="checkbox" ${isSubscribed ? 'checked' : ''} onchange="toggleSub(${occ.id}, this.checked)"/>
+              <span class="slider"></span>
+            </label>
+            <span style="font-size:.68rem;text-align:center">${isSubscribed ? 'Auto an' : 'Auto aus'}</span>
+          </div>
+        </div>`;
+    }
+    html += '</div></div>';
+  }
+  main.innerHTML = html;
+  if (silent) window.scrollTo({top: savedY, behavior: 'instant'});
+}
+
+async function toggleSub(occId, subscribe) {
+  const card = document.getElementById('card-' + occId);
+  const endpoint = subscribe ? `/api/subscribe/${occId}` : `/api/unsubscribe/${occId}`;
+  await apiFetch(endpoint, {method: 'POST'});
+  // Only set 'subscribed' class if the card isn't already 'joined-yes'
+  if (!card.classList.contains('joined-yes')) {
+    card.classList.toggle('subscribed', subscribe);
+  }
+  const label = card.querySelector('.toggle-wrap span');
+  if (label) label.textContent = subscribe ? 'Auto an' : 'Auto aus';
+  toast(subscribe ? 'Kurs abonniert – wird automatisch gebucht.' : 'Abo entfernt.', subscribe ? 'ok' : 'ok');
+}
+
+async function doWaitlistJoin(occId, btn) {
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const data = await apiFetch(`/api/waitlist/${occId}`, {method: 'POST'});
+    const pos = data.waitlist_position;
+    toast(pos ? `Warteliste Platz ${pos}` : 'Auf Warteliste eingetragen.', 'ok');
+    await loadCourses(true);
+    await loadLog();
+  } catch(e) {
+    toast('Warteliste fehlgeschlagen: ' + e.message, 'err');
+    btn.disabled = false;
+    btn.textContent = 'Warteliste beitreten';
+  }
+}
+
+async function doWaitlistLeave(occId, btn) {
+  if (!confirm('Warteliste verlassen?')) return;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    await apiFetch(`/api/waitlist/${occId}`, {method: 'DELETE'});
+    toast('Warteliste verlassen.', 'ok');
+    await loadCourses(true);
+    await loadLog();
+  } catch(e) {
+    toast('Fehler: ' + e.message, 'err');
+    btn.disabled = false;
+    btn.textContent = 'Verlassen';
+  }
+}
+
+async function doLeave(occId, btn) {
+  if (!confirm('Wirklich vom Kurs abmelden?')) return;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    await apiFetch(`/api/leave/${occId}`, {method: 'POST'});
+    toast('Erfolgreich abgemeldet.', 'ok');
+    await loadCourses(true);
+    await loadLog();
+  } catch(e) {
+    toast('Abmelden fehlgeschlagen: ' + e.message, 'err');
+    btn.disabled = false;
+    btn.textContent = 'Abmelden';
+  }
+}
+
+function changeWeek(delta) {
+  weekOffset += delta;
+  loadCourses();
+}
+
+// ── Log ─────────────────────────────────────────────────────────────────────
+
+async function loadLog() {
+  const rows = await apiFetch('/api/log?limit=30');
+  const tbody = document.getElementById('logBody');
+  if (!rows.length) return;
+  tbody.innerHTML = rows.map(r => {
+    const pill = {booked:'pill-booked',failed:'pill-failed',scheduled:'pill-scheduled',canceled:'pill-canceled',waitlisted:'pill-waitlisted'}[r.status] || '';
+    return `<tr>
+      <td>${escHtml(r.name)}</td>
+      <td>${r.start_str || ''}</td>
+      <td><span class="pill ${pill}">${r.status}</span></td>
+      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(r.message||'')}">${escHtml(r.message||'')}</td>
+      <td>${r.attempted_at || ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Fetch / Login / Logout ──────────────────────────────────────────────────
+
+async function doFetch() {
+  const spinner = document.getElementById('fetchSpinner');
+  spinner.style.display = '';
+  try {
+    await apiFetch('/api/fetch', {method:'POST'});
+    await loadCourses();
+    toast('Kursplan aktualisiert!', 'ok');
+  } catch(e) {
+    toast('Fehler beim Laden: ' + e.message, 'err');
+  } finally {
+    spinner.style.display = 'none';
+  }
+}
+
+async function doLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const pw = document.getElementById('loginPw').value;
+  const errEl = document.getElementById('loginError');
+  const spinner = document.getElementById('loginSpinner');
+  errEl.textContent = '';
+  document.getElementById('loginSubtitle').style.display = '';
+  if (!email || !pw) { errEl.textContent = 'Bitte E-Mail und Passwort eingeben.'; return; }
+  spinner.style.display = '';
+  try {
+    const data = await apiFetch('/api/login', {method:'POST', body:JSON.stringify({email,password:pw})});
+    await refreshStatus();       // shows appShell, hides loginWall
+    toast('Willkommen' + (data.name ? ', ' + data.name : '') + '!', 'ok');
+    await doFetch();             // immediately load courses after login
+    await loadLog();
+  } catch(e) {
+    errEl.textContent = 'Login fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler');
+  } finally {
+    spinner.style.display = 'none';
+  }
+}
+
+async function doLogout() {
+  await apiFetch('/api/logout', {method:'POST'});
+  loggedIn = false;
+  document.getElementById('loginWall').style.display = 'flex';
+  document.getElementById('appShell').style.display  = 'none';
+  document.getElementById('logoutBtn').style.display = 'none';
+  document.getElementById('userLabel').textContent   = '';
+  document.getElementById('loginEmail').value = '';
+  document.getElementById('loginPw').value    = '';
+  document.getElementById('loginError').textContent = '';
+  toast('Abgemeldet.', 'ok');
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+async function apiFetch(url, opts={}) {
+  const defaults = {headers: {'Content-Type':'application/json'}};
+  const res = await fetch(url, {...defaults, ...opts});
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({error: res.statusText}));
+    throw new Error(body.error || res.statusText);
+  }
+  return res.json();
+}
+
+function escHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function toast(msg, type='ok') {
+  const c = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+async function init() {
+  await refreshStatus();
+  if (loggedIn) {
+    await loadCourses();
+    await loadLog();
+  } else {
+    // Focus email field after a tick so the element is visible
+    setTimeout(() => document.getElementById('loginEmail').focus(), 50);
+  }
+  // Auto-refresh every 60s (only does real work when logged in)
+  setInterval(async () => {
+    if (!loggedIn) return;
+    await refreshStatus();
+    await loadCourses(true);
+    await loadLog();
+  }, 60_000);
+}
+
+init();
+</script>
+</body>
+</html>
