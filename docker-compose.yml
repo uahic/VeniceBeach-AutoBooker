@@ -1,0 +1,11 @@
+services:
+  venice-autobooker:
+    container_name: venicebeach
+    build: .
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./fitness.db:/app/fitness.db
+    environment:
+      - DB_PATH=/app/fitness.db
