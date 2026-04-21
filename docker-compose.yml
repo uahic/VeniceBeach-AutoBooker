@@ -1,3 +1,5 @@
+version: '3'
+
 services:
   venice-autobooker:
     container_name: venicebeach
@@ -6,6 +8,18 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./fitness.db:/app/fitness.db
+      - venicebeach_data:/app/data
     environment:
-      - DB_PATH=/app/fitness.db
+      - DB_PATH=/app/data/fitness.db
+    networks:
+      homelab_public:
+        ipv4_address: 10.20.30.15
+
+
+networks:
+  homelab_public:
+    external: true
+
+volumes:
+  venicebeach_data:
+

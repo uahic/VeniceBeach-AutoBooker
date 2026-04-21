@@ -51,6 +51,7 @@ def init_db():
                 studio_id   INTEGER NOT NULL,
                 canceled_at INTEGER,
                 joined      INTEGER DEFAULT 0,    -- 1 = user is booked (from API)
+                joined_source TEXT,               -- 'app' = booked by this service, 'api' = already joined when fetched
                 waitlist_position INTEGER,        -- NULL = not on waitlist, N = position
                 fetched_at  INTEGER NOT NULL      -- when we last saw this
             );
@@ -78,6 +79,8 @@ def init_db():
             conn.execute("ALTER TABLE occurrences ADD COLUMN attendees_count INTEGER")
         if "waitlist_position" not in cols:
             conn.execute("ALTER TABLE occurrences ADD COLUMN waitlist_position INTEGER")
+        if "joined_source" not in cols:
+            conn.execute("ALTER TABLE occurrences ADD COLUMN joined_source TEXT")
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
@@ -109,8 +112,8 @@ def upsert_occurrences(occurrences: list[dict]):
                 INSERT INTO occurrences
                     (id, name, description, category, room, start_at, end_at,
                      max_participants, attendees_count, join_mandatory, join_open_prior_seconds,
-                     studio_id, canceled_at, joined, waitlist_position, fetched_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     studio_id, canceled_at, joined, joined_source, waitlist_position, fetched_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                     name=excluded.name,
                     description=excluded.description,
@@ -125,7 +128,8 @@ def upsert_occurrences(occurrences: list[dict]):
                     studio_id=excluded.studio_id,
                     canceled_at=excluded.canceled_at,
                     joined=excluded.joined,
-                    waitlist_position=excluded.waitlist_position,
+                    joined_source=CASE WHEN joined_source='app' THEN 'app' ELSE excluded.joined_source END,
+                    waitlist_position=COALESCE(excluded.waitlist_position, waitlist_position),
                     fetched_at=excluded.fetched_at
                 """,
                 (
@@ -143,6 +147,7 @@ def upsert_occurrences(occurrences: list[dict]):
                     o["studio_id"],
                     o.get("canceled_at"),
                     1 if o.get("joined") else 0,
+                    "api" if o.get("joined") else None,
                     o.get("waitlist_position"),
                     now,
                 ),
@@ -192,8 +197,17 @@ def remove_subscription(occurrence_id: int):
 def set_joined(occurrence_id: int, joined: bool):
     with db() as conn:
         conn.execute(
-            "UPDATE occurrences SET joined=? WHERE id=?",
-            (1 if joined else 0, occurrence_id),
+            "UPDATE occurrences SET joined=?, joined_source=? WHERE id=?",
+            (1 if joined else 0, "app" if joined else None, occurrence_id),
+        )
+
+
+def set_waitlisted(occurrence_id: int, position=None):
+    """Mark occurrence as waitlisted (joined=True, joined_source=NULL)."""
+    with db() as conn:
+        conn.execute(
+            "UPDATE occurrences SET joined=1, joined_source=NULL, waitlist_position=? WHERE id=?",
+            (position, occurrence_id),
         )
 
 

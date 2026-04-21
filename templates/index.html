@@ -419,7 +419,9 @@ async function loadCourses(silent = false) {
     for (const occ of day.occurrences) {
       const isPast = occ.end_at < now;
       const isSubscribed = occ.subscribed;
-      const isJoined = occ.joined;       // already booked (from API)
+      const isJoined = occ.joined;
+      const joinedSource = occ.joined_source;
+      const maybeWaitlisted = isJoined && joinedSource !== 'app';
       const waitlistPos = occ.waitlist_position;
       const isWaitlisted = waitlistPos !== null && waitlistPos !== undefined;
       const bookingOpen = occ.booking_opens_at <= now;
@@ -436,10 +438,11 @@ async function loadCourses(silent = false) {
             <div class="meta">
               ${occ.start_str} – ${occ.end_str}
               ${occ.room ? ' &bull; ' + escHtml(occ.room) : ''}
-              ${!occ.join_mandatory ? ' &bull; <em>Anmeldung freiwillig</em>' : ''}
+              ${occ.join_mandatory ? ' &bull; <em>Anmeldung freiwillig</em>' : ' &bull; <em>Anmeldung erforderlich</em>'}
             </div>
             ${occupancyHtml(occ)}
-            ${isJoined ? `<div style="margin-top:.35rem"><span class="badge-booked">&#10003; Angemeldet</span><button class="btn-leave" onclick="doLeave(${occ.id}, this)">Abmelden</button></div>` : ''}
+            ${isJoined && !maybeWaitlisted ? `<div style="margin-top:.35rem"><span class="badge-booked">&#10003; Angemeldet</span><button class="btn-leave" onclick="doLeave(${occ.id}, this)">Abmelden</button></div>` : ''}
+            ${isJoined && maybeWaitlisted ? `<div style="margin-top:.35rem"><span class="badge-waitlist">&#8987; Warteliste (Platz unbekannt – in App prüfen)</span><button class="btn-waitlist-leave" onclick="doWaitlistLeave(${occ.id}, this)">Verlassen</button></div>` : ''}
             ${isWaitlisted && !isJoined ? `<div style="margin-top:.35rem"><span class="badge-waitlist">&#8987; Warteliste Platz ${waitlistPos !== null ? waitlistPos : '?'}</span><button class="btn-waitlist-leave" onclick="doWaitlistLeave(${occ.id}, this)">Verlassen</button></div>` : ''}
             ${!isJoined && !isWaitlisted && isFull && bookingOpen ? `<button class="btn-waitlist-join" onclick="doWaitlistJoin(${occ.id}, this)">Warteliste beitreten</button>` : ''}
             ${!isJoined && !bookingOpen ? `<div class="open-hint">&#128275; Anmeldung ab ${occ.booking_opens_str}</div>` : ''}
@@ -494,13 +497,13 @@ async function doWaitlistLeave(occId, btn) {
   btn.textContent = '…';
   try {
     await apiFetch(`/api/waitlist/${occId}`, {method: 'DELETE'});
+    try { await apiFetch(`/api/unsubscribe/${occId}`, {method: 'POST'}); } catch(_) {}
     toast('Warteliste verlassen.', 'ok');
-    await loadCourses(true);
-    await loadLog();
   } catch(e) {
     toast('Fehler: ' + e.message, 'err');
-    btn.disabled = false;
-    btn.textContent = 'Verlassen';
+  } finally {
+    await loadCourses(true);
+    await loadLog();
   }
 }
 
@@ -510,13 +513,13 @@ async function doLeave(occId, btn) {
   btn.textContent = '…';
   try {
     await apiFetch(`/api/leave/${occId}`, {method: 'POST'});
+    try { await apiFetch(`/api/unsubscribe/${occId}`, {method: 'POST'}); } catch(_) {}
     toast('Erfolgreich abgemeldet.', 'ok');
-    await loadCourses(true);
-    await loadLog();
   } catch(e) {
     toast('Abmelden fehlgeschlagen: ' + e.message, 'err');
-    btn.disabled = false;
-    btn.textContent = 'Abmelden';
+  } finally {
+    await loadCourses(true);
+    await loadLog();
   }
 }
 

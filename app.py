@@ -126,7 +126,8 @@ def api_courses():
             "attendees_count": r["attendees_count"],
             "join_mandatory": bool(r["join_mandatory"]),
             "subscribed": bool(r["subscribed"]),
-            "joined": bool(r["joined"]),  # True = already booked (from API)
+            "joined": bool(r["joined"]) and r["waitlist_position"] is None,
+            "joined_source": r["joined_source"],
             "waitlist_position": r["waitlist_position"],
             "booking_opens_at": r["start_at"] - r["join_open_prior_seconds"],
             "booking_opens_str": _ts_to_str(r["start_at"] - r["join_open_prior_seconds"]),
@@ -198,10 +199,12 @@ def api_waitlist_join(occurrence_id):
         return jsonify({"error": "Not logged in"}), 401
     try:
         result = actinate.join_waitlist(occurrence_id, token)
-        position = result.get("waitlist_position") or result.get("position")
-        db.set_waitlist_position(occurrence_id, position)
+        occ_data = result.get("occurence", result)
+        position = (occ_data.get("waitlist_position") or occ_data.get("position")
+                    or result.get("waitlist_position") or result.get("position"))
+        db.set_waitlisted(occurrence_id, position)
         db.log_booking(occurrence_id, "waitlisted",
-                       f"Warteliste Platz {position}" if position else "Warteliste beigetreten")
+                       f"Warteliste Platz {position}" if position else "Warteliste beigetreten (Position unbekannt)")
         return jsonify({"ok": True, "waitlist_position": position})
     except Exception as e:
         status = getattr(getattr(e, "response", None), "status_code", 500)
@@ -217,8 +220,9 @@ def api_waitlist_leave(occurrence_id):
         return jsonify({"error": "Not logged in"}), 401
     try:
         result = actinate.leave_waitlist(occurrence_id, token)
+        db.set_joined(occurrence_id, False)
         db.set_waitlist_position(occurrence_id, None)
-        db.log_booking(occurrence_id, "canceled", f"Warteliste verlassen: {result}")
+        db.log_booking(occurrence_id, "canceled", "Warteliste verlassen")
         return jsonify({"ok": True})
     except Exception as e:
         status = getattr(getattr(e, "response", None), "status_code", 500)

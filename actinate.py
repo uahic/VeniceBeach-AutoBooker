@@ -122,23 +122,13 @@ def leave_occurrence(occurrence_id: int, access_token: str) -> dict:
 
 
 def join_waitlist(occurrence_id: int, access_token: str) -> dict:
-    """Join the waitlist for a full course occurrence."""
-    url = f"{BASE_URL}/widgets/v1/classes/occurences/waitlist"
-    headers = {"Authorization": f"Bearer {access_token}"}
-    resp = SESSION.post(url, headers=headers, params={"tenant": TENANT},
-                        json={"occurence_id": occurrence_id})
-    resp.raise_for_status()
-    return resp.json()
+    """Join the waitlist for a full course occurrence (same endpoint as regular join)."""
+    return join_occurrence(occurrence_id, access_token)
 
 
 def leave_waitlist(occurrence_id: int, access_token: str) -> dict:
-    """Leave the waitlist for a course occurrence."""
-    url = f"{BASE_URL}/widgets/v1/classes/occurences/waitlist"
-    headers = {"Authorization": f"Bearer {access_token}"}
-    resp = SESSION.delete(url, headers=headers, params={"tenant": TENANT},
-                          json={"occurence_id": occurrence_id})
-    resp.raise_for_status()
-    return resp.json()
+    """Leave the waitlist for a course occurrence (same endpoint as regular leave)."""
+    return leave_occurrence(occurrence_id, access_token)
 
 
 def get_me(access_token: str) -> dict:

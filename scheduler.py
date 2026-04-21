@@ -32,17 +32,31 @@ scheduler = BackgroundScheduler(timezone="Europe/Berlin")
 
 # ── Token management ──────────────────────────────────────────────────────────
 
+def _jwt_exp(token: str) -> int | None:
+    """Extract exp claim from a JWT without verifying signature."""
+    try:
+        import base64, json
+        payload = token.split(".")[1]
+        payload += "=" * (4 - len(payload) % 4)
+        return json.loads(base64.b64decode(payload)).get("exp")
+    except Exception:
+        return None
+
+
 def _get_token() -> str | None:
     """Return a valid access token, refreshing if needed."""
     token = sec.get_token("access_token")
-    expires = db.get_setting("token_expires")
 
     if not token:
         return None
 
     now = int(time.time())
-    # Refresh if less than 5 minutes left
-    if expires and int(expires) - now < 300:
+    exp = _jwt_exp(token)
+    # Refresh if JWT expires in less than 5 minutes (or exp unreadable, fall back to stored value)
+    if exp is None:
+        expires = db.get_setting("token_expires")
+        exp = int(expires) if expires else now
+    if exp - now < 300:
         refresh = sec.get_token("refresh_token")
         if refresh:
             try:
@@ -95,9 +109,9 @@ def job_check_upcoming():
     for occ in subs:
         occ_id = occ["id"]
 
-        # Skip if already booked (via app or previous run)
-        if occ.get("joined"):
-            log.debug("Skipping '%s' – already joined.", occ["name"])
+        # Skip if already booked or on waitlist
+        if occ.get("joined") or occ.get("waitlist_position") is not None:
+            log.debug("Skipping '%s' – already joined or waitlisted.", occ["name"])
             continue
 
         open_at = occ["start_at"] - occ["join_open_prior_seconds"]
@@ -147,8 +161,18 @@ def _book_with_retry(occurrence_id: int):
 
         try:
             result = actinate.join_occurrence(occurrence_id, token)
-            log.info("Booked occurrence %d on attempt %d: %s", occurrence_id, attempt, result)
-            db.log_booking(occurrence_id, "booked", f"Attempt {attempt}: {result}")
+            occ_data = result.get("occurence", {})
+            attendees = occ_data.get("attendees_count")
+            max_p = occ_data.get("max_participants")
+            # API returns 200 even when course is full (user lands on waitlist silently)
+            if attendees is not None and max_p is not None and attendees >= max_p:
+                log.info("Occurrence %d full after join – likely waitlisted.", occurrence_id)
+                db.log_booking(occurrence_id, "waitlisted", f"Attempt {attempt}: Kurs voll, möglicherweise Warteliste")
+                db.set_waitlisted(occurrence_id)
+                _scheduled.discard(f"book_{occurrence_id}")
+                return
+            log.info("Booked occurrence %d on attempt %d.", occurrence_id, attempt)
+            db.log_booking(occurrence_id, "booked", f"Attempt {attempt}")
             db.set_joined(occurrence_id, True)
             db.set_waitlist_position(occurrence_id, None)
             _scheduled.discard(f"book_{occurrence_id}")
@@ -169,6 +193,12 @@ def _book_with_retry(occurrence_id: int):
                 _join_waitlist(occurrence_id, token)
                 _scheduled.discard(f"book_{occurrence_id}")
                 return
+            if status_code == 498:
+                log.warning("Token expired during booking attempt %d for %d – aborting.", attempt, occurrence_id)
+                db.log_booking(occurrence_id, "failed", f"Token abgelaufen (498)")
+                db.set_setting("session_expired", "1")
+                _scheduled.discard(f"book_{occurrence_id}")
+                return
             if status_code == 403:
                 log.warning("Occurrence %d not yet open or forbidden (403): %s", occurrence_id, msg)
             else:
@@ -187,9 +217,10 @@ def _join_waitlist(occurrence_id: int, token: str):
     """Try to join the waitlist for a full occurrence."""
     try:
         result = actinate.join_waitlist(occurrence_id, token)
-        position = result.get("waitlist_position") or result.get("position")
+        occ_data = result.get("occurence", result)
+        position = occ_data.get("waitlist_position") or occ_data.get("position")
         log.info("Joined waitlist for occurrence %d, position: %s", occurrence_id, position)
-        db.set_waitlist_position(occurrence_id, position)
+        db.set_waitlisted(occurrence_id, position)
         db.log_booking(occurrence_id, "waitlisted",
                        f"Warteliste Platz {position}" if position else "Warteliste (Position unbekannt)")
     except Exception as e:
