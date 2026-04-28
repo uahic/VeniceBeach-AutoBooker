@@ -11,6 +11,7 @@ services:
       - venicebeach_data:/app/data
     environment:
       - DB_PATH=/app/data/fitness.db
+      - TZ=Europe/Berlin
     networks:
       homelab_public:
         ipv4_address: 10.20.30.15
