@@ -309,6 +309,143 @@ def api_settings_post():
     return jsonify({"ok": True})
 
 
+# ── Recurring subscriptions ───────────────────────────────────────────────────
+
+_WEEKDAY_LABELS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+
+
+def _enrich_rule(rule: dict) -> dict:
+    rule["weekday_label"] = _WEEKDAY_LABELS[rule["weekday"]]
+    return rule
+
+
+def _validate_rule_body(body: dict) -> tuple[dict, str | None]:
+    name_substr = str(body.get("name_substr", "")).strip()
+    if not name_substr:
+        return {}, "name_substr darf nicht leer sein"
+    weekday = body.get("weekday")
+    if weekday is None or not isinstance(weekday, int) or not (0 <= weekday <= 6):
+        return {}, "weekday muss eine Zahl zwischen 0 (Mo) und 6 (So) sein"
+    hour = body.get("hour")
+    minute = int(body.get("minute", 0))
+    if hour is not None:
+        hour = int(hour)
+        if not (0 <= hour <= 23):
+            return {}, "hour muss zwischen 0 und 23 liegen"
+        if not (0 <= minute <= 59):
+            return {}, "minute muss zwischen 0 und 59 liegen"
+    tolerance_minutes = int(body.get("tolerance_minutes", 30))
+    if not (1 <= tolerance_minutes <= 180):
+        return {}, "tolerance_minutes muss zwischen 1 und 180 liegen"
+    active = bool(body.get("active", True))
+    return {
+        "name_substr": name_substr,
+        "weekday": weekday,
+        "hour": hour,
+        "minute": minute,
+        "tolerance_minutes": tolerance_minutes,
+        "active": active,
+    }, None
+
+
+@app.route("/api/recurring/courses", methods=["GET"])
+@_ui_auth_required
+def api_recurring_courses():
+    return jsonify(db.get_distinct_course_names())
+
+
+@app.route("/api/recurring/slots", methods=["GET"])
+@_ui_auth_required
+def api_recurring_slots():
+    name = request.args.get("name", "").strip()
+    if not name:
+        return jsonify([])
+    exclude_id = request.args.get("exclude_id", type=int)
+    slots = db.get_course_slots(name)
+    rules = db.get_recurring_rules()
+    covered = {
+        (r["name_substr"], r["weekday"], r["hour"], r["minute"])
+        for r in rules
+        if r["id"] != exclude_id
+    }
+    for s in slots:
+        s["has_rule"] = (name, s["weekday"], s["hour"], s["minute"]) in covered
+        s["weekday_label"] = _WEEKDAY_LABELS[s["weekday"]]
+        s["time_str"] = f"{s['hour']:02d}:{s['minute']:02d} Uhr"
+        s["key"] = f"{s['weekday']}|{s['hour']}|{s['minute']}"
+    return jsonify(slots)
+
+
+@app.route("/api/recurring", methods=["GET"])
+@_ui_auth_required
+def api_recurring_list():
+    rules = db.get_recurring_rules()
+    return jsonify([_enrich_rule(r) for r in rules])
+
+
+@app.route("/api/recurring", methods=["POST"])
+@_ui_auth_required
+def api_recurring_create():
+    body = request.get_json(force=True)
+    fields, err = _validate_rule_body(body)
+    if err:
+        return jsonify({"error": err}), 400
+    studio_id = int(db.get_setting("studio_id", "43"))
+    try:
+        rule_id = db.add_recurring_rule(
+            name_substr=fields["name_substr"],
+            weekday=fields["weekday"],
+            hour=fields["hour"],
+            minute=fields["minute"],
+            tolerance_minutes=fields["tolerance_minutes"],
+            studio_id=studio_id,
+            active=fields["active"],
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+    return jsonify({"id": rule_id}), 201
+
+
+@app.route("/api/recurring/<int:rule_id>", methods=["PUT"])
+@_ui_auth_required
+def api_recurring_update(rule_id):
+    rule = db.get_recurring_rule(rule_id)
+    if not rule:
+        return jsonify({"error": "Regel nicht gefunden"}), 404
+    body = request.get_json(force=True)
+    allowed = {"name_substr", "weekday", "hour", "minute", "tolerance_minutes", "active"}
+    updates = {k: v for k, v in body.items() if k in allowed}
+    if updates:
+        db.update_recurring_rule(rule_id, **updates)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/recurring/<int:rule_id>", methods=["DELETE"])
+@_ui_auth_required
+def api_recurring_delete(rule_id):
+    db.delete_recurring_rule(rule_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/recurring/<int:rule_id>/preview", methods=["GET"])
+@_ui_auth_required
+def api_recurring_preview(rule_id):
+    rule = db.get_recurring_rule(rule_id)
+    if not rule:
+        return jsonify({"error": "Regel nicht gefunden"}), 404
+    matches = db.preview_recurring_rule(rule_id)
+    for m in matches:
+        m["start_str"] = _ts_to_str(m["start_at"])
+    return jsonify({"rule_id": rule_id, "matches": matches})
+
+
+@app.route("/api/recurring/apply", methods=["POST"])
+@_ui_auth_required
+def api_recurring_apply():
+    new_subs = db.apply_recurring_rules()
+    return jsonify({"new_subscriptions": new_subs})
+
+
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))

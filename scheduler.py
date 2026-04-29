@@ -125,6 +125,9 @@ def job_fetch_courses():
         db.upsert_occurrences(occurrences)
         db.set_setting("last_fetch", str(int(time.time())))
         log.info("Fetched %d occurrences (authenticated=%s).", len(occurrences), bool(token))
+        new_subs = db.apply_recurring_rules()
+        if new_subs:
+            log.info("Recurring rules auto-subscribed %d new occurrence(s).", new_subs)
     except Exception as e:
         log.error("Course fetch failed: %s", e)
 

@@ -15,6 +15,9 @@ Die App macht nur als dauerhaft laufender Hintergrundprozess Sinn (Server, NAS, 
 
 ## Changelog
 
+### v1.2
+- Regelmaessige automatische Kursanmeldungen sind nun moeglich
+
 ### v1.1
 - Wartelisten-Unterstützung: automatisches Beitreten und Verlassen der Warteliste
 - Anzeige der Wartelistenposition in der UI

@@ -241,6 +241,24 @@
     .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid #ccc; border-top-color: var(--blue); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* Recurring rules */
+    .recurring-section { max-width: 900px; margin: 1rem auto; padding: 0 1rem; }
+    .recurring-header { display: flex; align-items: center; gap: .75rem; margin-bottom: .6rem; }
+    .recurring-header h2 { font-size: 1rem; font-weight: 700; flex: 1; }
+    .rule-card { background: var(--card); border: 1.5px solid var(--border); border-radius: 10px; padding: .75rem 1rem; display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; margin-bottom: .6rem; }
+    .rule-card.active { border-color: var(--blue); }
+    .rule-card.inactive { opacity: .6; }
+    .rule-card .rule-title { font-weight: 600; font-size: .95rem; }
+    .rule-card .rule-meta { font-size: .82rem; color: var(--muted); margin-top: .2rem; }
+    .rule-card .rule-actions { display: flex; gap: .4rem; margin-top: .5rem; flex-wrap: wrap; }
+    .rule-preview-list { margin-top: .5rem; padding: .5rem .75rem; background: #f0f7ff; border-radius: 7px; font-size: .82rem; }
+    .rule-preview-list li { padding: .15rem 0; color: #1a3a5c; }
+    .rule-preview-none { color: var(--muted); font-style: italic; }
+    .field-inline { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .85rem; }
+    .field-inline label { font-size: .85rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+    .field-inline input, .field-inline select { padding: .5rem .7rem; border: 1.5px solid var(--border); border-radius: 7px; font-size: .9rem; outline: none; }
+    .field-inline input:focus, .field-inline select:focus { border-color: var(--blue); }
+
     .toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; display: flex; flex-direction: column; gap: .5rem; z-index: 999; }
     .toast {
       padding: .7rem 1.1rem; border-radius: 8px; font-size: .9rem; font-weight: 500;
@@ -309,6 +327,49 @@
   </div>
 </div>
 
+<!-- Recurring bookings section -->
+<div class="recurring-section">
+  <div class="recurring-header">
+    <h2>Wiederkehrende Buchungen</h2>
+    <button class="btn btn-outline btn-sm" onclick="toggleRecurringPanel()">
+      <span id="recurringToggleLabel">Ausblenden</span>
+    </button>
+    <button class="btn btn-primary btn-sm" onclick="openRuleModal()">+ Buchungsregel</button>
+  </div>
+  <div id="recurringPanel">
+    <div id="recurringList"><p style="color:var(--muted);font-size:.85rem">Keine Buchungsregeln vorhanden.</p></div>
+  </div>
+</div>
+
+<!-- Rule add/edit modal -->
+<div class="modal-overlay hidden" id="ruleModalOverlay" onclick="if(event.target===this)closeRuleModal()">
+  <div class="modal" style="width:min(480px,95vw)">
+    <h2 id="ruleModalTitle">Neue Regel</h2>
+    <input type="hidden" id="ruleEditId"/>
+    <div class="field-inline">
+      <label for="ruleNameSelect">Kurs</label>
+      <select id="ruleNameSelect" style="flex:1;min-width:150px" onchange="_loadSlots(this.value, null, parseInt(document.getElementById('ruleEditId').value)||null)">
+        <option value="">– Kurs wählen –</option>
+      </select>
+    </div>
+    <div style="margin-bottom:.85rem">
+      <div style="font-size:.85rem;font-weight:600;color:var(--muted);margin-bottom:.45rem">Termin</div>
+      <div id="ruleSlotsList" style="font-size:.88rem;color:var(--muted)">Bitte zuerst einen Kurs auswählen.</div>
+    </div>
+    <div class="field-inline">
+      <label>
+        <input type="checkbox" id="ruleActive" checked/>
+        Aktiv
+      </label>
+    </div>
+    <div id="ruleModalError" class="error-msg"></div>
+    <div style="display:flex;gap:.6rem;margin-top:1.2rem;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeRuleModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="saveRule()">Speichern</button>
+    </div>
+  </div>
+</div>
+
 <!-- Main -->
 <main id="main">
   <p class="empty"><span class="spinner"></span> Kurse werden geladen…</p>
@@ -344,6 +405,7 @@ const DAY_NAMES = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freita
 let weekOffset = 0;
 let loggedIn = false;
 let uiAuthenticated = false;
+let _ruleOccData = {};
 
 // ── Status polling ──────────────────────────────────────────────────────────
 
@@ -426,6 +488,14 @@ async function loadCourses(silent = false) {
       <div class="course-grid">`;
     for (const occ of day.occurrences) {
       const isPast = occ.end_at < now;
+      const _dt = new Date(occ.start_at * 1000);
+      const _jsDay = _dt.getDay();
+      _ruleOccData[occ.id] = {
+        name: occ.name,
+        weekday: _jsDay === 0 ? 6 : _jsDay - 1,
+        hour: _dt.getHours(),
+        minute: _dt.getMinutes(),
+      };
       const isSubscribed = occ.subscribed;
       const isJoined = occ.joined;
       const joinedSource = occ.joined_source;
@@ -450,10 +520,11 @@ async function loadCourses(silent = false) {
             </div>
             ${occupancyHtml(occ)}
             ${isJoined && !maybeWaitlisted ? `<div style="margin-top:.35rem"><span class="badge-booked">&#10003; Angemeldet</span><button class="btn-leave" onclick="doLeave(${occ.id}, this)">Abmelden</button></div>` : ''}
-            ${isJoined && maybeWaitlisted ? `<div style="margin-top:.35rem"><span class="badge-waitlist">&#8987; Warteliste (Platz unbekannt – in App prüfen)</span><button class="btn-waitlist-leave" onclick="doWaitlistLeave(${occ.id}, this)">Verlassen</button></div>` : ''}
+            ${isJoined && maybeWaitlisted ? `<div style="margin-top:.35rem"><span class="badge-booked">&#10003; Angemeldet</span><span style="font-size:.75rem;color:var(--muted);margin-left:.4rem">(Buchungsstatus in App prüfen)</span><button class="btn-leave" onclick="doLeave(${occ.id}, this)">Abmelden</button></div>` : ''}
             ${isWaitlisted && !isJoined ? `<div style="margin-top:.35rem"><span class="badge-waitlist">&#8987; Warteliste Platz ${waitlistPos !== null ? waitlistPos : '?'}</span><button class="btn-waitlist-leave" onclick="doWaitlistLeave(${occ.id}, this)">Verlassen</button></div>` : ''}
             ${!isJoined && !isWaitlisted && isFull && bookingOpen ? `<button class="btn-waitlist-join" onclick="doWaitlistJoin(${occ.id}, this)">Warteliste beitreten</button>` : ''}
             ${!isJoined && !bookingOpen ? `<div class="open-hint">&#128275; Anmeldung ab ${occ.booking_opens_str}</div>` : ''}
+            ${!isPast ? `<div style="margin-top:.4rem"><button class="btn btn-outline btn-sm" style="font-size:.75rem;padding:.2rem .55rem" onclick="openRuleModalForCourse(${occ.id})">&#8635; Regelmäßig buchen</button></div>` : ''}
           </div>
           <div class="toggle-wrap">
             <label class="toggle" title="${isSubscribed ? 'Auto-Anmeldung aktiv' : 'Auto-Anmeldung aktivieren'}">
@@ -562,6 +633,7 @@ async function doFetch() {
   try {
     await apiFetch('/api/fetch', {method:'POST'});
     await loadCourses();
+    if (recurringPanelOpen) await loadRecurringRules();
     toast('Kursplan aktualisiert!', 'ok');
   } catch(e) {
     toast('Fehler beim Laden: ' + e.message, 'err');
@@ -631,6 +703,218 @@ function toast(msg, type='ok') {
   setTimeout(() => el.remove(), 3500);
 }
 
+// ── Recurring rules ─────────────────────────────────────────────────────────
+
+const WEEKDAY_LABELS = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
+let recurringPanelOpen = true;
+
+async function _loadSlots(courseName, preselectKey, excludeRuleId = null) {
+  const el = document.getElementById('ruleSlotsList');
+  if (!courseName) {
+    el.innerHTML = '<span style="color:var(--muted)">Bitte zuerst einen Kurs auswählen.</span>';
+    return;
+  }
+  el.innerHTML = '<span class="spinner"></span>';
+  try {
+    let url = `/api/recurring/slots?name=${encodeURIComponent(courseName)}`;
+    if (excludeRuleId) url += `&exclude_id=${excludeRuleId}`;
+    const slots = await apiFetch(url);
+    if (!slots.length) {
+      el.innerHTML = '<span style="color:var(--muted)">Keine bevorstehenden Termine für diesen Kurs gefunden.</span>';
+      return;
+    }
+    const firstFree = slots.findIndex(s => !s.has_rule);
+    el.innerHTML = slots.map((s, i) => {
+      const isPreselect = preselectKey ? s.key === preselectKey : i === firstFree;
+      if (s.has_rule) {
+        return `<label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;opacity:.45;cursor:default" title="Bereits als Buchungsregel vorhanden">
+          <input type="radio" name="ruleSlot" value="${escHtml(s.key)}" disabled/>
+          <span>${escHtml(s.weekday_label)}, ${escHtml(s.time_str)} <em style="font-size:.78rem">(Regel vorhanden)</em></span>
+        </label>`;
+      }
+      return `<label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;cursor:pointer">
+        <input type="radio" name="ruleSlot" value="${escHtml(s.key)}" ${isPreselect ? 'checked' : ''}/>
+        <span>${escHtml(s.weekday_label)}, ${escHtml(s.time_str)}</span>
+      </label>`;
+    }).join('');
+    // Saved slot no longer in upcoming occurrences
+    if (preselectKey && !slots.find(s => s.key === preselectKey)) {
+      const [wd, h, m] = preselectKey.split('|').map(Number);
+      const wdLabel = WEEKDAY_LABELS[wd];
+      el.innerHTML += `
+        <label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;cursor:pointer;opacity:.6">
+          <input type="radio" name="ruleSlot" value="${escHtml(preselectKey)}" checked/>
+          <span>${escHtml(wdLabel)}, ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} Uhr
+            <em style="font-size:.78rem">(nicht mehr im Stundenplan)</em></span>
+        </label>`;
+    }
+  } catch(e) {
+    el.innerHTML = `<span style="color:var(--red)">Fehler: ${escHtml(e.message)}</span>`;
+  }
+}
+
+function toggleRecurringPanel() {
+  recurringPanelOpen = !recurringPanelOpen;
+  document.getElementById('recurringPanel').style.display = recurringPanelOpen ? '' : 'none';
+  document.getElementById('recurringToggleLabel').textContent = recurringPanelOpen ? 'Ausblenden' : 'Anzeigen';
+  if (recurringPanelOpen) loadRecurringRules();
+}
+
+async function loadRecurringRules() {
+  const rules = await apiFetch('/api/recurring');
+  const el = document.getElementById('recurringList');
+  if (!rules.length) {
+    el.innerHTML = '<p style="color:var(--muted);font-size:.85rem">Keine Buchungsregeln vorhanden.</p>';
+    return;
+  }
+  el.innerHTML = rules.map(r => {
+    const timeStr = r.hour !== null && r.hour !== undefined
+      ? ` · ${String(r.hour).padStart(2,'0')}:${String(r.minute||0).padStart(2,'0')} ±${r.tolerance_minutes} Min`
+      : '';
+    const lastMatch = r.last_matched_at
+      ? `<div class="rule-meta">Zuletzt abgeglichen: ${r.last_matched_at}</div>`
+      : '';
+    return `<div class="rule-card ${r.active ? 'active' : 'inactive'}" id="rule-card-${r.id}">
+      <div style="flex:1">
+        <div class="rule-title">${escHtml(r.name_substr)} · ${escHtml(r.weekday_label)}${escHtml(timeStr)}</div>
+        ${lastMatch}
+        <div class="rule-actions">
+          <button class="btn btn-outline btn-sm" onclick="previewRule(${r.id})">Vorschau</button>
+          <button class="btn btn-outline btn-sm" onclick="openRuleModal(${r.id})">Bearbeiten</button>
+          <button class="btn btn-sm" style="background:#ffebee;color:var(--red)" onclick="deleteRule(${r.id})">×</button>
+        </div>
+        <div id="rule-preview-${r.id}"></div>
+      </div>
+      <div class="toggle-wrap">
+        <label class="toggle" title="${r.active ? 'Aktiv' : 'Inaktiv'}">
+          <input type="checkbox" ${r.active ? 'checked' : ''} onchange="toggleRule(${r.id}, this.checked)"/>
+          <span class="slider"></span>
+        </label>
+        <span style="font-size:.68rem;text-align:center">${r.active ? 'Aktiv' : 'Inaktiv'}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function toggleRule(ruleId, active) {
+  await apiFetch(`/api/recurring/${ruleId}`, {method:'PUT', body:JSON.stringify({active})});
+  await loadRecurringRules();
+}
+
+async function deleteRule(ruleId) {
+  if (!confirm('Regel löschen?')) return;
+  await apiFetch(`/api/recurring/${ruleId}`, {method:'DELETE'});
+  await loadRecurringRules();
+  toast('Regel gelöscht.', 'ok');
+}
+
+async function previewRule(ruleId) {
+  const el = document.getElementById(`rule-preview-${ruleId}`);
+  el.innerHTML = '<span class="spinner"></span>';
+  try {
+    const data = await apiFetch(`/api/recurring/${ruleId}/preview`);
+    if (!data.matches.length) {
+      el.innerHTML = '<div class="rule-preview-list"><span class="rule-preview-none">Keine passenden Kurse in den nächsten 14 Tagen.</span></div>';
+      return;
+    }
+    el.innerHTML = `<ul class="rule-preview-list">${data.matches.map(m =>
+      `<li>${escHtml(m.start_str)} – ${escHtml(m.name)}${m.already_subscribed ? ' <em>(bereits abonniert)</em>' : ''}</li>`
+    ).join('')}</ul>`;
+  } catch(e) {
+    el.innerHTML = `<div class="rule-preview-list"><span class="rule-preview-none">Fehler: ${escHtml(e.message)}</span></div>`;
+  }
+}
+
+
+async function _populateCourseSelect(preselectName) {
+  const sel = document.getElementById('ruleNameSelect');
+  sel.innerHTML = '<option value="">– Kurs wählen –</option>';
+  try {
+    const names = await apiFetch('/api/recurring/courses');
+    names.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      if (name === preselectName) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    // If preselectName not in list (e.g. past course), add it so it can be edited
+    if (preselectName && !names.includes(preselectName)) {
+      const opt = document.createElement('option');
+      opt.value = preselectName;
+      opt.textContent = preselectName;
+      opt.selected = true;
+      sel.appendChild(opt);
+    }
+  } catch(_) {}
+}
+
+async function openRuleModal(ruleId) {
+  document.getElementById('ruleModalError').textContent = '';
+  document.getElementById('ruleEditId').value = ruleId || '';
+  document.getElementById('ruleModalTitle').textContent = ruleId ? 'Buchungsregel bearbeiten' : 'Neue Buchungsregel';
+  if (ruleId) {
+    const rule = await apiFetch(`/api/recurring`).then(rs => rs.find(r => r.id === ruleId));
+    if (rule) {
+      await _populateCourseSelect(rule.name_substr);
+      const preselectKey = rule.hour !== null && rule.hour !== undefined
+        ? `${rule.weekday}|${rule.hour}|${rule.minute || 0}` : null;
+      await _loadSlots(rule.name_substr, preselectKey, ruleId);
+      document.getElementById('ruleActive').checked = !!rule.active;
+    }
+  } else {
+    await _populateCourseSelect(null);
+    await _loadSlots(null, null);
+    document.getElementById('ruleActive').checked = true;
+  }
+  document.getElementById('ruleModalOverlay').classList.remove('hidden');
+}
+
+async function openRuleModalForCourse(occId) {
+  const d = _ruleOccData[occId];
+  if (!d) return;
+  document.getElementById('ruleModalError').textContent = '';
+  document.getElementById('ruleEditId').value = '';
+  document.getElementById('ruleModalTitle').textContent = 'Neue Buchungsregel';
+  await _populateCourseSelect(d.name);
+  const preselectKey = `${d.weekday}|${d.hour}|${d.minute}`;
+  await _loadSlots(d.name, preselectKey);
+  document.getElementById('ruleActive').checked = true;
+  document.getElementById('ruleModalOverlay').classList.remove('hidden');
+}
+
+function closeRuleModal() {
+  document.getElementById('ruleModalOverlay').classList.add('hidden');
+}
+
+async function saveRule() {
+  const errEl = document.getElementById('ruleModalError');
+  errEl.textContent = '';
+  const editId = document.getElementById('ruleEditId').value;
+  const name_substr = document.getElementById('ruleNameSelect').value.trim();
+  if (!name_substr) { errEl.textContent = 'Bitte einen Kurs auswählen.'; return; }
+  const slotRadio = document.querySelector('input[name="ruleSlot"]:checked');
+  if (!slotRadio) { errEl.textContent = 'Bitte einen Termin auswählen.'; return; }
+  const [weekday, hour, minute] = slotRadio.value.split('|').map(Number);
+  const active = document.getElementById('ruleActive').checked;
+  const body = {name_substr, weekday, hour, minute, tolerance_minutes: 30, active};
+  try {
+    if (editId) {
+      await apiFetch(`/api/recurring/${editId}`, {method:'PUT', body:JSON.stringify(body)});
+    } else {
+      await apiFetch('/api/recurring', {method:'POST', body:JSON.stringify(body)});
+    }
+    closeRuleModal();
+    const result = await apiFetch('/api/recurring/apply', {method:'POST'});
+    const n = result.new_subscriptions;
+    toast(`Regel gespeichert.${n ? ` ${n} neue Buchung(en) vorgemerkt.` : ''}`, 'ok');
+    await loadRecurringRules();
+    await loadCourses(true);
+  } catch(e) {
+    errEl.textContent = e.message;
+  }
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 async function init() {
@@ -638,6 +922,7 @@ async function init() {
   if (uiAuthenticated) {
     await loadCourses();
     await loadLog();
+    await loadRecurringRules();
   } else {
     setTimeout(() => document.getElementById('loginEmail').focus(), 50);
   }
@@ -646,6 +931,7 @@ async function init() {
     await refreshStatus();
     await loadCourses(true);
     await loadLog();
+    if (recurringPanelOpen) await loadRecurringRules();
   }, 60_000);
 }
 

@@ -1,7 +1,13 @@
 """SQLite database layer for VeniceBeach auto-booker."""
 import sqlite3
 import os
+import time
+import datetime
 from contextlib import contextmanager
+
+import pytz
+
+_BERLIN = pytz.timezone("Europe/Berlin")
 
 DB_PATH = os.environ.get("DB_PATH", "fitness.db")
 
@@ -70,6 +76,20 @@ def init_db():
                 message       TEXT,
                 attempted_at  TEXT DEFAULT CURRENT_TIMESTAMP
             );
+
+            -- Rules for recurring auto-subscriptions
+            CREATE TABLE IF NOT EXISTS recurring_subscriptions (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                name_substr       TEXT    NOT NULL,
+                weekday           INTEGER NOT NULL,  -- 0=Mon … 6=Sun
+                hour              INTEGER,           -- NULL = any time
+                minute            INTEGER DEFAULT 0,
+                tolerance_minutes INTEGER DEFAULT 30,
+                studio_id         INTEGER NOT NULL DEFAULT 43,
+                active            INTEGER NOT NULL DEFAULT 1,
+                created_at        TEXT    DEFAULT CURRENT_TIMESTAMP,
+                last_matched_at   TEXT
+            );
         """)
         # Migrations for existing databases
         cols = [r[1] for r in conn.execute("PRAGMA table_info(occurrences)").fetchall()]
@@ -103,7 +123,6 @@ def set_setting(key: str, value: str):
 
 def upsert_occurrences(occurrences: list[dict]):
     """Insert or update a list of occurrence dicts from the API."""
-    import time
     now = int(time.time())
     with db() as conn:
         for o in occurrences:
@@ -282,3 +301,166 @@ def get_recent_log(limit: int = 50):
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ── Recurring subscriptions ───────────────────────────────────────────────────
+
+_RECURRING_FIELDS = {"name_substr", "weekday", "hour", "minute", "tolerance_minutes", "studio_id", "active"}
+
+
+def get_recurring_rules(active_only: bool = False) -> list[dict]:
+    with db() as conn:
+        q = "SELECT * FROM recurring_subscriptions"
+        if active_only:
+            q += " WHERE active=1"
+        q += " ORDER BY id"
+        return [dict(r) for r in conn.execute(q).fetchall()]
+
+
+def get_recurring_rule(rule_id: int) -> dict | None:
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM recurring_subscriptions WHERE id=?", (rule_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def add_recurring_rule(name_substr: str, weekday: int, hour: int | None,
+                       minute: int, tolerance_minutes: int,
+                       studio_id: int, active: bool) -> int:
+    with db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM recurring_subscriptions WHERE name_substr=? AND weekday=? AND hour=? AND minute=?",
+            (name_substr, weekday, hour, minute),
+        ).fetchone()
+        if existing:
+            raise ValueError(f"Eine Buchungsregel für diesen Kurs und Termin existiert bereits.")
+        cur = conn.execute(
+            """INSERT INTO recurring_subscriptions
+               (name_substr, weekday, hour, minute, tolerance_minutes, studio_id, active)
+               VALUES (?,?,?,?,?,?,?)""",
+            (name_substr, weekday, hour, minute, tolerance_minutes, studio_id, 1 if active else 0),
+        )
+        return cur.lastrowid
+
+
+def update_recurring_rule(rule_id: int, **kwargs) -> bool:
+    fields = {k: v for k, v in kwargs.items() if k in _RECURRING_FIELDS}
+    if not fields:
+        return False
+    set_clause = ", ".join(f"{k}=?" for k in fields)
+    values = list(fields.values()) + [rule_id]
+    with db() as conn:
+        conn.execute(
+            f"UPDATE recurring_subscriptions SET {set_clause} WHERE id=?", values
+        )
+        changed = conn.execute("SELECT changes()").fetchone()[0]
+        return changed > 0
+
+
+def delete_recurring_rule(rule_id: int):
+    with db() as conn:
+        conn.execute("DELETE FROM recurring_subscriptions WHERE id=?", (rule_id,))
+
+
+def _matches_rule(rule: dict, occ: dict) -> bool:
+    if occ["studio_id"] != rule["studio_id"]:
+        return False
+    if rule["name_substr"].lower() not in occ["name"].lower():
+        return False
+    dt = datetime.datetime.fromtimestamp(occ["start_at"], tz=_BERLIN)
+    if dt.weekday() != rule["weekday"]:
+        return False
+    if rule["hour"] is not None:
+        rule_min = rule["hour"] * 60 + (rule["minute"] or 0)
+        occ_min = dt.hour * 60 + dt.minute
+        if abs(occ_min - rule_min) > rule["tolerance_minutes"]:
+            return False
+    return True
+
+
+def get_course_slots(name: str) -> list[dict]:
+    """Return distinct (weekday, hour, minute) slots for upcoming occurrences of a course."""
+    now = int(time.time())
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT start_at FROM occurrences WHERE name=? AND start_at>? AND canceled_at IS NULL ORDER BY start_at",
+            (name, now),
+        ).fetchall()
+    seen = set()
+    slots = []
+    for r in rows:
+        dt = datetime.datetime.fromtimestamp(r["start_at"], tz=_BERLIN)
+        key = (dt.weekday(), dt.hour, dt.minute)
+        if key not in seen:
+            seen.add(key)
+            slots.append({"weekday": dt.weekday(), "hour": dt.hour, "minute": dt.minute})
+    slots.sort(key=lambda s: (s["weekday"], s["hour"], s["minute"]))
+    return slots
+
+
+def get_distinct_course_names() -> list[str]:
+    now = int(time.time())
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT name FROM occurrences WHERE start_at > ? AND canceled_at IS NULL ORDER BY name",
+            (now,),
+        ).fetchall()
+        return [r["name"] for r in rows]
+
+
+def apply_recurring_rules() -> int:
+    """Match active rules against future unsubscribed occurrences. Returns new subscription count."""
+    now = int(time.time())
+    with db() as conn:
+        rules = [dict(r) for r in conn.execute(
+            "SELECT * FROM recurring_subscriptions WHERE active=1"
+        ).fetchall()]
+        if not rules:
+            return 0
+        candidates = [dict(r) for r in conn.execute(
+            """
+            SELECT o.id, o.name, o.start_at, o.studio_id
+            FROM occurrences o
+            LEFT JOIN subscriptions s ON s.occurrence_id = o.id
+            WHERE o.start_at > ? AND o.canceled_at IS NULL AND s.occurrence_id IS NULL
+            """,
+            (now,),
+        ).fetchall()]
+        new_count = 0
+        for rule in rules:
+            for occ in candidates:
+                if _matches_rule(rule, occ):
+                    conn.execute(
+                        "INSERT OR IGNORE INTO subscriptions(occurrence_id) VALUES(?)",
+                        (occ["id"],),
+                    )
+                    new_count += conn.execute("SELECT changes()").fetchone()[0]
+            conn.execute(
+                "UPDATE recurring_subscriptions SET last_matched_at=datetime('now') WHERE id=?",
+                (rule["id"],),
+            )
+        return new_count
+
+
+def preview_recurring_rule(rule_id: int) -> list[dict]:
+    """Dry-run: return matching future occurrences without writing to DB."""
+    now = int(time.time())
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM recurring_subscriptions WHERE id=?", (rule_id,)
+        ).fetchone()
+        if not row:
+            return []
+        rule = dict(row)
+        candidates = [dict(r) for r in conn.execute(
+            """
+            SELECT o.id, o.name, o.start_at, o.studio_id,
+                   (s.occurrence_id IS NOT NULL) AS already_subscribed
+            FROM occurrences o
+            LEFT JOIN subscriptions s ON s.occurrence_id = o.id
+            WHERE o.start_at > ? AND o.canceled_at IS NULL
+            """,
+            (now,),
+        ).fetchall()]
+        return [c for c in candidates if _matches_rule(rule, c)]
