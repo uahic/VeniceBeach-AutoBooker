@@ -278,6 +278,12 @@
       <input type="password" id="loginPw" placeholder="••••••••" autocomplete="current-password"
              onkeydown="if(event.key==='Enter')doLogin()"/>
     </div>
+    <div style="background:#f0f7ff;border:1.5px solid #b3d4f5;border-radius:8px;padding:.75rem .9rem;margin-bottom:1rem;font-size:.82rem;color:#1a3a5c;line-height:1.5">
+      <strong>&#128274; Zugangsdaten werden verschlüsselt gespeichert</strong><br>
+      Der Service läuft dauerhaft im Hintergrund und muss sich bei Sitzungsablauf selbstständig neu anmelden –
+      z.&nbsp;B. wenn du dich zwischendurch in der VeniceBeach-App einloggst und dadurch die bestehende Sitzung ungültig wird.<br>
+      <span style="color:#555;margin-top:.35rem;display:block">E-Mail und Passwort werden mit AES-256 (Fernet) verschlüsselt auf dem Server gespeichert. Der automatisch generierte Schlüssel liegt ausschließlich lokal in der Datei <code style="font-size:.78rem;background:#e8eef4;padding:.1rem .3rem;border-radius:3px">.secret_key</code> im Verzeichnis des VeniceBeach Auto-Bookers und verlässt deinen Rechner/Server nicht. Diese Datei musst du geheim halten.</span>
+    </div>
     <div id="loginError" class="error-msg"></div>
     <button class="btn btn-primary" onclick="doLogin()" style="width:100%;margin-top:1.2rem;padding:.65rem">
       <span id="loginSpinner" class="spinner" style="display:none"></span>
@@ -572,10 +578,10 @@ async function doLogin() {
   if (!email || !pw) { errEl.textContent = 'Bitte E-Mail und Passwort eingeben.'; return; }
   spinner.style.display = '';
   try {
-    const data = await apiFetch('/api/login', {method:'POST', body:JSON.stringify({email,password:pw})});
-    await refreshStatus();       // shows appShell, hides loginWall
+    const data = await apiFetch('/api/login', {method:'POST', body:JSON.stringify({email, password:pw, save_credentials:true})});
+    await refreshStatus();
     toast('Willkommen' + (data.name ? ', ' + data.name : '') + '!', 'ok');
-    await doFetch();             // immediately load courses after login
+    await doFetch();
     await loadLog();
   } catch(e) {
     errEl.textContent = 'Login fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler');

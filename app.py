@@ -62,6 +62,7 @@ def api_status():
         "session_expired": db.get_setting("session_expired") == "1",
         "last_fetch": int(last_fetch) if last_fetch else None,
         "studio_id": int(db.get_setting("studio_id", "43")),
+        "refresh_token_exp": sched.get_refresh_token_exp(),
     })
 
 
@@ -78,7 +79,8 @@ def api_login():
         status = getattr(getattr(e, "response", None), "status_code", 500)
         return jsonify({"error": str(e)}), status
     sched.store_tokens(data)
-    # Try to get user info
+    sec.set_token("credential_email", email)
+    sec.set_token("credential_password", password)
     try:
         me = actinate.get_me(data["access_token"])
         name = me.get("firstname", "") + " " + me.get("lastname", "")
@@ -91,6 +93,8 @@ def api_login():
 @app.route("/api/logout", methods=["POST"])
 def api_logout():
     sec.clear_tokens()
+    sec.set_token("credential_email", "")
+    sec.set_token("credential_password", "")
     db.set_setting("token_expires", "")
     db.set_setting("session_expired", "")
     db.set_setting("user_name", "")

@@ -52,11 +52,11 @@ def _get_token() -> str | None:
 
     now = int(time.time())
     exp = _jwt_exp(token)
-    # Refresh if JWT expires in less than 5 minutes (or exp unreadable, fall back to stored value)
+    # Refresh if JWT expires in less than 2 hours (or exp unreadable, fall back to stored value)
     if exp is None:
         expires = db.get_setting("token_expires")
         exp = int(expires) if expires else now
-    if exp - now < 300:
+    if exp - now < 7200:
         refresh = sec.get_token("refresh_token")
         if refresh:
             try:
@@ -64,10 +64,13 @@ def _get_token() -> str | None:
                 _store_tokens(data)
                 return data.get("access_token")
             except Exception as e:
-                log.warning("Token refresh failed – clearing session: %s", e)
-                sec.clear_tokens()
-                db.set_setting("token_expires", "")
+                log.warning("Token refresh failed, trying credential re-login: %s", e)
+                new_token = _try_credential_relogin()
+                if new_token:
+                    return new_token
                 db.set_setting("session_expired", "1")
+                if exp > now:
+                    return token
                 return None
 
     return token
@@ -75,13 +78,39 @@ def _get_token() -> str | None:
 
 def _store_tokens(data: dict):
     sec.set_token("access_token", data["access_token"])
-    # Only overwrite refresh_token if a new one was returned
     new_refresh = data.get("refresh_token")
     if new_refresh:
         sec.set_token("refresh_token", new_refresh)
     expires_in = int(data.get("expires_in", 3600))
     db.set_setting("token_expires", str(int(time.time()) + expires_in))
     db.set_setting("session_expired", "")
+
+    import datetime
+    access_exp = _jwt_exp(data["access_token"])
+    access_str = datetime.datetime.fromtimestamp(access_exp).strftime("%Y-%m-%d %H:%M:%S") if access_exp else f"+{expires_in}s"
+    refresh_exp = _jwt_exp(new_refresh) if new_refresh else _jwt_exp(sec.get_token("refresh_token") or "")
+    if refresh_exp:
+        refresh_str = datetime.datetime.fromtimestamp(refresh_exp).strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        refresh_str = "unbekannt (kein exp-Claim im JWT)"
+    log.info("Tokens gespeichert – access_token gültig bis: %s | refresh_token gültig bis: %s", access_str, refresh_str)
+
+
+def _try_credential_relogin() -> str | None:
+    """Re-login with stored credentials. Returns new access token or None."""
+    email = sec.get_token("credential_email")
+    password = sec.get_token("credential_password")
+    if not email or not password:
+        return None
+    try:
+        data = actinate.login(email, password)
+        _store_tokens(data)
+        log.info("Auto-relogin successful for %s", email)
+        db.set_setting("session_expired", "")
+        return data.get("access_token")
+    except Exception as e:
+        log.error("Auto-relogin failed for %s: %s", email, e)
+        return None
 
 
 # ── Fetch job (every 30 min) ───────────────────────────────────────────────────
@@ -255,3 +284,11 @@ def manual_fetch():
 
 def get_token():
     return _get_token()
+
+
+def get_refresh_token_exp() -> int | None:
+    """Return the exp timestamp of the stored refresh token, or None."""
+    refresh = sec.get_token("refresh_token")
+    if not refresh:
+        return None
+    return _jwt_exp(refresh)
