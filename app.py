@@ -1,9 +1,11 @@
 """Flask web server for VeniceBeach auto-booker."""
 import logging
+import os
 import time
 from datetime import date, timedelta, datetime
+from functools import wraps
 
-from flask import Flask, jsonify, request, render_template, abort
+from flask import Flask, jsonify, request, render_template, session
 
 import db
 import actinate
@@ -17,6 +19,18 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
+_secret = os.environ.get("VENICEBEACH_SECRET_KEY", "")
+app.secret_key = _secret if _secret else os.urandom(24)
+
+
+def _ui_auth_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("ui_authenticated"):
+            return jsonify({"error": "Nicht angemeldet"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -59,6 +73,7 @@ def api_status():
     last_fetch = db.get_setting("last_fetch")
     return jsonify({
         "logged_in": bool(token),
+        "ui_authenticated": bool(session.get("ui_authenticated")),
         "session_expired": db.get_setting("session_expired") == "1",
         "last_fetch": int(last_fetch) if last_fetch else None,
         "studio_id": int(db.get_setting("studio_id", "43")),
@@ -73,6 +88,18 @@ def api_login():
     password = body.get("password", "").strip()
     if not email or not password:
         return jsonify({"error": "email and password required"}), 400
+
+    stored_email = sec.get_token("credential_email")
+    stored_password = sec.get_token("credential_password")
+
+    if stored_email and stored_password:
+        # Server already configured: validate credentials locally (UI gate only)
+        if email != stored_email or password != stored_password:
+            return jsonify({"error": "Ungültige Anmeldedaten"}), 401
+        session["ui_authenticated"] = True
+        return jsonify({"ok": True, "name": db.get_setting("user_name", "")})
+
+    # First-time setup: authenticate against VeniceBeach and store credentials
     try:
         data = actinate.login(email, password)
     except Exception as e:
@@ -81,6 +108,7 @@ def api_login():
     sched.store_tokens(data)
     sec.set_token("credential_email", email)
     sec.set_token("credential_password", password)
+    session["ui_authenticated"] = True
     try:
         me = actinate.get_me(data["access_token"])
         name = me.get("firstname", "") + " " + me.get("lastname", "")
@@ -91,7 +119,9 @@ def api_login():
 
 
 @app.route("/api/logout", methods=["POST"])
+@_ui_auth_required
 def api_logout():
+    session.clear()
     sec.clear_tokens()
     sec.set_token("credential_email", "")
     sec.set_token("credential_password", "")
@@ -102,6 +132,7 @@ def api_logout():
 
 
 @app.route("/api/courses")
+@_ui_auth_required
 def api_courses():
     """Return occurrences grouped by day. Query param: week_offset (default 0)."""
     offset = int(request.args.get("week_offset", 0))
@@ -145,6 +176,7 @@ def api_courses():
 
 
 @app.route("/api/subscribe/<int:occurrence_id>", methods=["POST"])
+@_ui_auth_required
 def api_subscribe(occurrence_id):
     occ = db.get_occurrence(occurrence_id)
     if not occ:
@@ -154,12 +186,14 @@ def api_subscribe(occurrence_id):
 
 
 @app.route("/api/unsubscribe/<int:occurrence_id>", methods=["POST"])
+@_ui_auth_required
 def api_unsubscribe(occurrence_id):
     db.remove_subscription(occurrence_id)
     return jsonify({"ok": True})
 
 
 @app.route("/api/fetch", methods=["POST"])
+@_ui_auth_required
 def api_fetch():
     """Manually trigger a course fetch."""
     try:
@@ -170,6 +204,7 @@ def api_fetch():
 
 
 @app.route("/api/log")
+@_ui_auth_required
 def api_log():
     limit = int(request.args.get("limit", 50))
     rows = db.get_recent_log(limit)
@@ -179,6 +214,7 @@ def api_log():
 
 
 @app.route("/api/book/<int:occurrence_id>", methods=["POST"])
+@_ui_auth_required
 def api_book_now(occurrence_id):
     """Immediately try to book an occurrence (manual trigger)."""
     token = sched.get_token()
@@ -196,6 +232,7 @@ def api_book_now(occurrence_id):
 
 
 @app.route("/api/waitlist/<int:occurrence_id>", methods=["POST"])
+@_ui_auth_required
 def api_waitlist_join(occurrence_id):
     """Join the waitlist for a full occurrence."""
     token = sched.get_token()
@@ -217,6 +254,7 @@ def api_waitlist_join(occurrence_id):
 
 
 @app.route("/api/waitlist/<int:occurrence_id>", methods=["DELETE"])
+@_ui_auth_required
 def api_waitlist_leave(occurrence_id):
     """Leave the waitlist for an occurrence."""
     token = sched.get_token()
@@ -235,6 +273,7 @@ def api_waitlist_leave(occurrence_id):
 
 
 @app.route("/api/leave/<int:occurrence_id>", methods=["POST"])
+@_ui_auth_required
 def api_leave(occurrence_id):
     """Cancel (leave) a booked occurrence."""
     token = sched.get_token()
@@ -253,6 +292,7 @@ def api_leave(occurrence_id):
 
 
 @app.route("/api/settings", methods=["GET"])
+@_ui_auth_required
 def api_settings_get():
     return jsonify({
         "studio_id": db.get_setting("studio_id", "43"),
@@ -261,6 +301,7 @@ def api_settings_get():
 
 
 @app.route("/api/settings", methods=["POST"])
+@_ui_auth_required
 def api_settings_post():
     body = request.get_json(force=True)
     if "studio_id" in body:

@@ -343,18 +343,20 @@ const DAY_NAMES = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freita
 
 let weekOffset = 0;
 let loggedIn = false;
+let uiAuthenticated = false;
 
 // ── Status polling ──────────────────────────────────────────────────────────
 
 async function refreshStatus() {
   const data = await apiFetch('/api/status');
   loggedIn = data.logged_in;
+  uiAuthenticated = data.ui_authenticated;
 
-  document.getElementById('loginWall').style.display = loggedIn ? 'none' : 'flex';
-  document.getElementById('appShell').style.display  = loggedIn ? 'block' : 'none';
-  document.getElementById('logoutBtn').style.display = loggedIn ? '' : 'none';
+  document.getElementById('loginWall').style.display = uiAuthenticated ? 'none' : 'flex';
+  document.getElementById('appShell').style.display  = uiAuthenticated ? 'block' : 'none';
+  document.getElementById('logoutBtn').style.display = uiAuthenticated ? '' : 'none';
 
-  if (!loggedIn) {
+  if (!uiAuthenticated) {
     if (data.session_expired) {
       document.getElementById('loginSubtitle').style.display = 'none';
       document.getElementById('loginError').textContent = 'Sitzung abgelaufen – bitte erneut anmelden.';
@@ -362,7 +364,7 @@ async function refreshStatus() {
     }
   }
 
-  if (loggedIn) {
+  if (uiAuthenticated) {
     const settings = await apiFetch('/api/settings');
     document.getElementById('userLabel').textContent = settings.user_name || '';
     if (data.last_fetch) {
@@ -593,6 +595,7 @@ async function doLogin() {
 async function doLogout() {
   await apiFetch('/api/logout', {method:'POST'});
   loggedIn = false;
+  uiAuthenticated = false;
   document.getElementById('loginWall').style.display = 'flex';
   document.getElementById('appShell').style.display  = 'none';
   document.getElementById('logoutBtn').style.display = 'none';
@@ -632,16 +635,14 @@ function toast(msg, type='ok') {
 
 async function init() {
   await refreshStatus();
-  if (loggedIn) {
+  if (uiAuthenticated) {
     await loadCourses();
     await loadLog();
   } else {
-    // Focus email field after a tick so the element is visible
     setTimeout(() => document.getElementById('loginEmail').focus(), 50);
   }
-  // Auto-refresh every 60s (only does real work when logged in)
   setInterval(async () => {
-    if (!loggedIn) return;
+    if (!uiAuthenticated) return;
     await refreshStatus();
     await loadCourses(true);
     await loadLog();

@@ -1,70 +1,111 @@
-# VeniceBeach Karlsruhe Sudstadt AutoBooker
+# VeniceBeach Karlsruhe Südstadt — AutoBooker
 
-Geht euch auf der Lauer liegen für eine Kursanmeldung auf den Sack? mir auch.
+> Geht euch auf der Lauer liegen für eine Kursanmeldung auf den Sack? Mir auch.
 
-Kurse können im Vorraus in einem Wochenplan festgelegt werden zur Buchung, der Hintergrundprozess (Ein Python WebServer basierend auf Flask) versucht dann ab dem ersten möglichen Zeitpunkt jede Minute eine Buchung oder setzt dich auf die Warteliste (falls es eine gibt).
-Die Verwendung der App macht natürlich nur als dauerhaft laufender Hintergrundprozess/Server Sinn (Server, NAS, RaspberryPI,...)
+Kurse können im Voraus in einem Wochenplan zur automatischen Buchung festgelegt werden. Der Hintergrundprozess (ein Python-Webserver auf Basis von Flask) versucht ab dem ersten möglichen Zeitpunkt jede Minute eine Buchung durchzuführen — oder setzt dich auf die Warteliste, falls der Kurs voll ist.
 
-Alles läuft bei euch lokal auf dem Rechner, es wird kein Cloud-Service verwendet.
+Die App macht nur als dauerhaft laufender Hintergrundprozess Sinn (Server, NAS, Raspberry Pi, ...). Alles läuft **lokal bei euch** — es wird kein Cloud-Service verwendet.
 
+---
 
-Ein lokales Testen der App (ohne Installation der App selbst als Systemservice) ist durch ausführen von ```python app.py```, sofern die Python-Dependencies aus requirements.txt installiert wurden, möglich (und öffnen im Browser unter ```http://localhost:5000```).
+![Login](screenshots/screenshot_login.png)
+![Kursliste](screenshots/screenshot_list.png)
 
-![ScreenshotLogin](screenshots/screenshot_login.png)
-![ScreenshotListe](screenshots/screenshot_list.png)
+---
 
-## Sicherheitsaspekte 
-Euer Passwort und Benutzername wird niergends gespeichert (könnt ihr im Source Code prüfen oder von einem Chatbot prüfen lassen). 
+## Changelog
 
-Was gespeichert wird, sind die Token die man vom Authentifizierungssystem nach dem Login erhält. Dies ist technisch notwendig um automatisiert Buchungen zu einem späteren Zeitpunkt durchführen zu können. 
+### v1.1
+- Wartelisten-Unterstützung: automatisches Beitreten und Verlassen der Warteliste
+- Anzeige der Wartelistenposition in der UI
+- Bugfixes rund um Wartelisten-Anzeige und -Verwaltung
+- Container auf Berliner Zeitzone gesetzt
+- UI (bzw. API-Endpoints) sind nun auch lokal Passwortgeschuetzt, unabhaengig davon ob der Server die Credentials bereits kennt oder nicht.
 
+### v1.0
+- Erstveröffentlichung
 
-Unter ```Linux``` werden access_token und refresh_token in der SQL Datenbank verschlüsselt gespeichert mit Hilfe der Fernet Bibliothek. Der Schlüssel selbst ist als Umgebungsvariable gespeichert ($VENICEBEACH_SECRET_KEY). 
+---
 
-Die install.sh führt folgende Schritte zusätzlich zu dem eigentlichen Setup des Services durch:
-- Generiert beim ersten Installieren einen Fernet-Key und schreibt ihn in secrets.env (Berechtigungen: 600, nur für den eigenen User lesbar)
-- Vorhandenes secrets.env wird bei Reinstallation nicht überschrieben (sonst wären gespeicherte Tokens unlesbar)
-- Service-Datei referenziert secrets.env via EnvironmentFile=
-- Deinstallation fragt optional ob secrets.env gelöscht werden soll 
+## Schnellstart (lokaler Test)
 
+```bash
+pip install -r requirements.txt
+python app.py
+```
 
-Unter ```Windows``` werden access_token und refresh_token im "Windows Credential Manager" via keyring gespeichert. 
+Dann im Browser unter `http://localhost:5000` öffnen.
 
-## Setup für Linux
+---
 
-```install.sh ``` ausführen. 
+## Setup
 
-Das Installationsskript versucht eine Installation unter Root-Rechten/Sudo, wenn dies nicht gegeben ist wird ein User-Service unter ```~./config/systemd/user/``` angelegt und mit ```loginctl enable-linger``` registriert damit der Service auch ohne aktiven Login ab dem nächsten Neustart im Hintergrund läuft.  
+### Linux
 
-Das Skript automatisiert die folgenden Schritte:
+```bash
+./install.sh
+```
+
+Das Skript erkennt automatisch ob Root-Rechte vorhanden sind. Ohne sudo wird ein **User-Service** unter `~/.config/systemd/user/` angelegt und per `loginctl enable-linger` registriert, sodass der Service auch ohne aktiven Login beim nächsten Neustart startet.
+
+**Was das Skript macht:**
 
 1. Prüft Python 3.10+
-2. Erstellt venv/ und installiert alle Pakete
-3. Generiert die systemd-Service-Datei mit korrektem Pfad/User
-4. Aktiviert den Service mit systemctl enable (startet automatisch beim Booten)
-5. Gibt nützliche Verwaltungsbefehle am Ende aus
+2. Erstellt `venv/` und installiert alle Pakete
+3. Generiert einen Fernet-Schlüssel und schreibt ihn in `secrets.env` (Berechtigungen: 600)
+4. Generiert die systemd-Service-Datei mit korrektem Pfad und User
+5. Aktiviert den Service mit `systemctl enable` (autostart beim Booten)
+6. Gibt nützliche Verwaltungsbefehle aus
 
-Im Browser dann unter ```http://localhost:5000``` erreichbar (ausser Port 5000 war schon belegt als der Service gestartet wurde)
+Erreichbar unter `http://localhost:5000`.
 
+**Deinstallation:**
 
+```bash
+./install.sh --uninstall
+```
 
-## Deinstallation Linux
+---
 
-``` install.sh --uninstall ``` ausführen
+### Windows
 
-## Setup für Windows
+```bat
+install.bat
+```
 
-Einfach nur  ```install.bat``` aufrufen, die folgenden Schritte sollten dann automatisiert ablaufen:
+**Was das Skript macht:**
 
-1. Ruft install.ps1 mit umgangener ExecutionPolicy auf (kein manueller Schritt nötig)
-2. Prüft Vorhandensein von Python 3.10+ auf deinem System
-3. Erstellt eine virtuelle Umgebung (venv/) für und installiert Pakete
-4. Erzeugt start_hidden.vbs — startet pythonw.exe ohne Konsolenfenster
-5. Registriert einen Task im Windows-Aufgabenplaner: startet automatisch bei jedem Login
-6. Fragt am Ende ob der Browser geöffnet werden sol
+1. Ruft `install.ps1` mit umgangener ExecutionPolicy auf (kein manueller Schritt nötig)
+2. Prüft Python 3.10+ auf dem System
+3. Erstellt `venv/` und installiert alle Pakete
+4. Erzeugt `start_hidden.vbs` — startet `pythonw.exe` ohne Konsolenfenster
+5. Registriert einen Task im Windows-Aufgabenplaner (autostart bei jedem Login)
+6. Fragt ob der Browser direkt geöffnet werden soll
 
-Im Browser dann unter ```http://localhost:5000``` erreichbar (ausser Port 5000 war schon belegt als der Service gestartet wurde)
+Erreichbar unter `http://localhost:5000`.
 
+**Deinstallation:**
 
-## Deinstallation unter Windows
-```install.bat /uninstall ``` ausführen
+```bat
+install.bat /uninstall
+```
+
+---
+
+## Sicherheitsaspekte
+
+Nach dem Login werden **E-Mail-Adresse, Passwort und die API-Token** (access_token, refresh_token) lokal gespeichert. Das Passwort wird benötigt, damit die App sich nach einem Token-Ablauf automatisch neu anmelden kann — ohne erneuten manuellen Eingriff.
+
+Alle Zugangsdaten werden **verschlüsselt** abgelegt und liegen zu keinem Zeitpunkt im Klartext auf der Festplatte (Ausnahme: Dev-Modus ohne gesetzten Secret Key).
+
+| Plattform | Speicherort | Verschlüsselung |
+|-----------|-------------|-----------------|
+| Linux | SQLite-Datenbank | Fernet (symmetrisch), Schlüssel in `$VENICEBEACH_SECRET_KEY` |
+| Windows | Windows Credential Manager | OS-seitig via `keyring` |
+
+**Wie `install.sh` den Schlüssel verwaltet (Linux):**
+
+- Generiert beim ersten Installieren einen Fernet-Key und schreibt ihn in `secrets.env` (Berechtigungen: `600`, nur für den eigenen User lesbar)
+- Vorhandenes `secrets.env` wird bei Reinstallation **nicht** überschrieben (sonst wären gespeicherte Daten unlesbar)
+- Die systemd-Service-Datei lädt `secrets.env` via `EnvironmentFile=`
+- Bei Deinstallation wird optional gefragt, ob `secrets.env` gelöscht werden soll
